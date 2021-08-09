@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-basedir<-"~/Documents/CPH/Students/Yiran Zhang/SMMR"
+basedir<-"set-your-directory"
 rm(list=ls())
 setwd(basedir)
 library(GEOquery)
@@ -40,7 +40,7 @@ save.image("GSE14468.RData")
 rm(list=ls())
 gc()
 options(expressions=500000)
-setwd("Documents/CPH/Students/Yiran Zhang/SMMR")
+setwd("set-your-directory")
 library(GEOquery)
 library(affy)
 load("GSE14468.RData")
