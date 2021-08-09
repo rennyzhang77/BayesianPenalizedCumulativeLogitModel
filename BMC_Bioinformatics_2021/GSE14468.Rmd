@@ -1,0 +1,94 @@
+---
+title: "BMC Bioninf Data Application"
+author: "Kellie J. Archer"
+date: "7/22/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+basedir<-"~/Documents/CPH/Students/Yiran Zhang/SMMR"
+rm(list=ls())
+setwd(basedir)
+library(GEOquery)
+pheno<-getGEO(filename="GSE14468_series_matrix.txt.gz")
+pheno<-pheno[,sampleNames(pheno)!="GSM159114"]
+library(affy)
+date_format <- "%m/%d/%y %H:%M:%S"
+phenoData<-new("AnnotatedDataFrame", pData(pheno), varMetadata=data.frame(labelDescription=colnames(pData(pheno))))
+batch<-read.affybatch(files=paste("GSE14468_RAW/",sampleNames(pheno),".CEL.gz",sep=""),phenoData=phenoData)
+### Add scan date and extract year of scan
+library(digest)
+library(purrr)
+library(stringr)
+library(affyio)
+library(lubridate)
+scan_date <- paste("GSE14468_RAW/",sampleNames(pheno),".CEL.gz",sep="") %>%
+   map(read.celfile.header, info = "full") %>%
+   map_chr("ScanDate") %>%
+   mdy_hms()
+year <- year(scan_date)
+pData(batch)$scan_date<-scan_date
+pData(batch)$year<-year
+rm(scan_date, year)
+save.image("GSE14468.RData")
+#####################################
+# Using Terminal Window due to memory limitations
+## ulimit -s 16384
+# ulimit -m 33554432 -v 3355443
+## R --slave -e 'Cstack_info()["size"]'
+rm(list=ls())
+gc()
+options(expressions=500000)
+setwd("Documents/CPH/Students/Yiran Zhang/SMMR")
+library(GEOquery)
+library(affy)
+load("GSE14468.RData")
+mas5<-mas5(batch)
+save.image("GSE14468.RData")
+GAPDH <- grep("GAPDH", featureNames(mas5))
+featureNames(mas5)[GAPDH]
+gapdh <- exprs(mas5)[GAPDH[1],]/exprs(mas5)[GAPDH[2],]
+sum(gapdh>10)  # exclude No samples
+summary(gapdh)
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.8679  0.9961  1.0369  1.0728  1.0998  2.3397 
+
+mas5.calls <- mas5calls(batch, alpha1 = 0.045, alpha2 = 0.065)
+save.image("GSE14468.RData")
+head(exprs(mas5.calls))
+absent <- apply(exprs(mas5.calls), 1, function(x) sum(ifelse(x=="A", 1, 0)))
+table(absent)
+AFFX <- grep("AFFX", featureNames(mas5.calls))
+featureNames(mas5.calls)[AFFX]  
+rma <- rma(batch)
+absent.woAFFX <- absent[-AFFX]
+rma.woAFFX <- rma[-AFFX,]
+mas5.calls.woAFFX<- mas5.calls[-AFFX,]
+table(absent.woAFFX)
+all.equal(featureNames(rma.woAFFX), names(absent.woAFFX))
+all.equal(featureNames(mas5.calls.woAFFX), names(absent.woAFFX))
+  
+rma.filter <- rma.woAFFX[absent.woAFFX != dim(pData(batch))[1]]
+absent.filter<-absent.woAFFX[absent.woAFFX != dim(pData(batch))[1]]
+mas5.calls.filter <- mas5.calls.woAFFX[absent.woAFFX != dim(pData(batch))[1]]
+all.equal(names(absent.filter), featureNames(mas5.calls.filter))
+all.equal(featureNames(rma.filter), featureNames(mas5.calls.filter))
+all.equal(sampleNames(rma.filter), sampleNames(mas5.calls.filter))
+names(pData(rma.filter))
+present.sample<-apply(exprs(mas5.calls.filter),2,function(x) sum(x=="P"))
+present.percent<-present.sample/dim(exprs(rma.filter))[1]*100
+summary(present.percent)
+present.percent[present.percent<mean(present.percent)-3*sd(present.percent)]
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#  27.86   44.45   47.36   47.17   50.24   57.16 
+rma.filter.final<-rma.filter[,present.percent>mean(present.percent)-3*sd(present.percent)]
+#GSM158758 GSM159033 GSM159092 GSM159109 
+# 28.20007  27.86012  34.04270  33.02511
+mas5.calls.filter<-mas5.calls.filter[,present.percent>mean(present.percent)-3*sd(present.percent)]
+
+all.equal(names(absent.filter), featureNames(mas5.calls.filter))
+all.equal(featureNames(rma.filter.final), featureNames(mas5.calls.filter))
+all.equal(sampleNames(rma.filter.final), sampleNames(mas5.calls.filter))
+save.image("GSE14468.RData")
+```

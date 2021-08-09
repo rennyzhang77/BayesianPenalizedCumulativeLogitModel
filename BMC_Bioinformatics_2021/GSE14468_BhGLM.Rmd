@@ -1,0 +1,77 @@
+---
+title: "Bayesian Variable Selection: BhGLM R Package"
+author: "Kellie J. Archer"
+date: "12/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#####################################
+# Using Terminal Window due to memory limitations
+## ulimit -s 16384
+# ulimit -m 33554432 -v 3355443
+## R --slave -e 'Cstack_info()["size"]'
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+gc()
+options(expressions=500000)
+setwd("your-directory-that-stores-GSE14468.RData")
+library(affy)
+library(BhGLM)
+load("GSE14468.RData")
+# Further process the data
+
+rma.cyto.risk<-rma.filter.final[,pData(rma.filter.final)$"risk:ch1"%in%c("cytogenetic good","cytogenetic intermediate","cytogenetic poor")]
+
+pData(rma.cyto.risk)$"risk:ch1"<-factor(pData(rma.cyto.risk)$"risk:ch1", levels=c("cytogenetic good","cytogenetic intermediate","cytogenetic poor"), ordered=TRUE)
+k<-nlevels(pData(rma.cyto.risk)$"risk:ch1")
+std.dev<-apply(exprs(rma.cyto.risk),1,sd)
+expression<-rma.cyto.risk[std.dev>quantile(std.dev,0.99),]
+
+rm(absent, absent.filter, absent.woAFFX, AFFX, batch, date_format, gapdh, GAPDH, mas5, mas5.calls, mas5.calls.filter, mas5.calls.woAFFX, out, phenoData, present.percent, present.sample, rma, rma.filter, rma.woAFFX)
+gc()
+# Center and scale the features
+X<-t(exprs(expression))
+X<-scale(X, center=TRUE, scale=TRUE)
+dataset<-data.frame(y=pData(rma.cyto.risk)$"risk:ch1",X)
+## BhGLM bpolr
+## Student-t 0.05 prior
+BhGLM.t.05<-bpolr(y~., data=dataset, 
+      method = c("logistic"), 
+      prior = Student(0, 0.05, 1),  verbose = TRUE)
+output<-summary(BhGLM.t.05) # What is t value? Est/SD test stat
+plot.bh(BhGLM.t.05)
+probesets.t.05<-as.character(rownames(output$coefficients[abs(output$coefficients[,"t value"])>1.91,]))
+probesets.t.05<-gsub("X","",probesets.t.05)
+probesets.t.05<-probesets.t.05[-grep("cytogenetic",probesets.t.05)]
+## Student-t 0.50 prior
+BhGLM.t.50<-bpolr(y~., data=dataset, 
+      method = c("logistic"), 
+      prior = Student(0, 0.5, 1),  verbose = TRUE)
+output<-summary(BhGLM.t.50) # What is t value? Est/SD test stat
+plot.bh(BhGLM.t.50)
+probesets.t.50<-as.character(rownames(output$coefficients[abs(output$coefficients[,"t value"])>1.91,]))
+# None identified
+
+#### Student-t 0.25 prior
+BhGLM.t.25<-bpolr(y~., data=dataset, 
+      method = c("logistic"), 
+      prior = Student(0, 0.25, 1),  verbose = TRUE)
+output<-summary(BhGLM.t.25) # What is t value? Est/SD test stat
+plot.bh(BhGLM.t.25)
+probesets.t.25<-as.character(rownames(output$coefficients[abs(output$coefficients[,"t value"])>1.91,]))
+## Only 228827_at
+
+#### Student-t 0.25 prior
+BhGLM.t.01<-bpolr(y~., data=dataset, 
+      method = c("logistic"), 
+      prior = Student(0, 0.01, 1),  verbose = TRUE)
+output<-summary(BhGLM.t.01) # What is t value? Est/SD test stat
+plot.bh(BhGLM.t.01)
+probesets.t.01<-as.character(rownames(output$coefficients[abs(output$coefficients[,"t value"])>1.91,]))
+## Only 228827_at
+
+save.image("BhGLM_Results.RData")
+```
+
+

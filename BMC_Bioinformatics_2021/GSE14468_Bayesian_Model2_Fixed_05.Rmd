@@ -1,0 +1,147 @@
+---
+title: "Bayesian Variable Selection: Model 2 with Fixed prior 0.05"
+author: "Kellie J. Archer"
+date: "7/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#####################################
+# Using Terminal Window due to memory limitations
+## ulimit -s 16384
+# ulimit -m 33554432 -v 3355443
+## R --slave -e 'Cstack_info()["size"]'
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+gc()
+options(expressions=500000)
+setwd("your-directory-that-stores-GSE14468.RData")
+library(affy)
+require("HDInterval")
+require("MASS")
+require("Matrix")
+require("dclone")
+load("GSE14468.RData")
+# Further process the data
+
+rma.cyto.risk<-rma.filter.final[,pData(rma.filter.final)$"risk:ch1"%in%c("cytogenetic good","cytogenetic intermediate","cytogenetic poor")]
+
+pData(rma.cyto.risk)$"risk:ch1"<-factor(pData(rma.cyto.risk)$"risk:ch1", levels=c("cytogenetic good","cytogenetic intermediate","cytogenetic poor"), ordered=TRUE)
+k<-nlevels(pData(rma.cyto.risk)$"risk:ch1")
+std.dev<-apply(exprs(rma.cyto.risk),1,sd)
+expression<-rma.cyto.risk[std.dev>quantile(std.dev,0.99),]
+
+rm(absent, absent.filter, absent.woAFFX, AFFX, batch, date_format, gapdh, GAPDH, mas5, mas5.calls, mas5.calls.filter, mas5.calls.woAFFX, out, phenoData, present.percent, present.sample, rma, rma.filter, rma.woAFFX)
+gc()
+# Center and scale the features
+X<-t(exprs(expression))
+X<-scale(X, center=TRUE, scale=TRUE)
+## Model 2, fixed prior
+set.seed(12345)
+a <- 0.1 # a and b are hyperparameters in the Gamma prior for lambda: lambda ~ Gamma(a, b)
+b <- 0.1
+N <- dim(expression)[2]
+P <- dim(expression)[1]
+p = 0.05
+y <- matrix(as.numeric(pData(rma.cyto.risk)$"risk:ch1"),ncol=1)
+epsilon <- 0.1 # epsilon is a small positive number for hypothesis testing using bayes factor 
+sigma0 = sqrt(0.01) # sigma0 and sigma1 are standard deviations for the two normal distributions constitute the priors for beta
+sigma1 = sqrt(10)
+cl = makePSOCKcluster(3) # Create a Parallel Socket Cluster for parallel MCMC chains
+
+### Proposed Bayesian Model II with fixed prior for pi
+model2 <- function(){
+  for(i in 1:N){
+    mu[i] <- inprod(X[i,],beta[]) 
+    logit(Q[i,1]) <- alpha[1]-mu[i]
+    p[i,1] <- Q[i,1]
+    for(j in 2:(k-1)){
+      logit(Q[i,j]) <- alpha[j]-mu[i]
+      p[i,j] <- Q[i,j] - Q[i,j-1]
+    }
+    p[i,k] <- 1 - Q[i,(k-1)]
+    y[i,] ~ dcat(p[i,1:k]) 
+  }
+  for (j in 1:P){
+    beta[j] <- N1[j] * (1 - gamma[j]) + N2[j] * gamma[j]
+    gamma[j] ~ dbern(0.05) 
+    N1[j] ~ dnorm(0, 100) # variance = 0.01
+    N2[j] ~ dnorm(0, 0.1) # variance = 10          
+  }
+  for (r in 1:(k-1)) {
+    alpha0[r] ~ dnorm(0, 1.0E-1)
+  }
+  alpha <- sort(alpha0)
+}
+
+### JAGS Set-up
+adaptSteps <- 5000              #number of steps to "tune" the samplers
+burnInSteps <- 5000             #number of steps to "burn-in" the samplers
+nChains <- 3                    #number of chains to run
+numSavedSteps <- 9999           #total number of steps in chains to save
+thinSteps <- 3                 	#number of steps to "thin" (1=keep every step)
+nIter <- ceiling((numSavedSteps*thinSteps )/nChains) 	#steps per chain
+
+
+
+  #initialize and adapt the model
+  jagsdf <- list(y=y,X=X, N=dim(X)[1], P =dim(X)[2], k=k) 
+  params <- c("beta", "gamma")
+  
+    inits1 <- list("alpha0" = sort(c(rnorm(1,log(1/2),.5), rnorm(1,log(2/1),.5))), "N1" = rep(0,P), "N2" = rep(0,P), "pi" = rep(0,P))
+  inits2 <- list("alpha0" = c(log(sum(y==1)/length(y)/(sum(y!=1)/length(y))), log(sum(y<=2)/length(y)/(sum(y>2)/length(y)))), "N1" = rep(0,P), "N2" = rep(0,P), "pi" = rep(0,P))
+  inits3 <- list("alpha0" = sort(c(rnorm(1,log(1/2),.5), rnorm(1,log(2/1),.5))), "N1" = rep(0,P), "N2" = rep(0,P), "pi" = rep(0,P))
+  
+  start.time.2.pi.05 <- Sys.time() 
+    parJagsModel(cl, name = "test", file = model2, 
+               data = jagsdf, inits = list(inits1, inits2, inits3),
+               n.chains = nChains, n.adapt=adaptSteps, quiet=FALSE)
+  # Burn-in the algorithm
+  parUpdate(cl, "test", n.iter=burnInSteps)
+  # Run MCMC algorithm
+  cat("Sampling final MCMC chain...\n" )
+  codaSamples <- parCodaSamples(cl, "test", variable.names=params, n.iter=nIter, thin=thinSteps)
+  end.time.2.pi.05 <- Sys.time() 
+  ### Retrieve posterior samples
+  mcmcChain <- as.matrix(codaSamples)
+  betamatrix <- mcmcChain[,grep("beta",dimnames(mcmcChain)[[2]])]
+  gammamatrix <- mcmcChain[,grep("gamma",dimnames(mcmcChain)[[2]])]
+
+### select variable using top 10 gamma mean's
+  gammamean = apply(gammamatrix, 2,mean)
+  gamma10.index.2 = sort(gammamean, decreasing = T, index.return =T)$ix[1:10]
+
+### select variable using bayes factor based on gamma
+  gammasum = apply(gammamatrix, 2,sum)
+  PostOdds = gammasum/(dim(gammamatrix)[1]-gammasum)
+  PriorOdds = p/(1-p)
+  BF<-PostOdds/PriorOdds
+  gamma.index.2 = (1:P)[PostOdds/PriorOdds > 10] # using threshold = 10 for bayes factor
+
+   ### select variable using bayes factor based on gammaXbeta
+  BetgmaPost1 = apply(betamatrix, 2, function(x) sum(abs(x) > epsilon))
+  BetgmaPost2 = apply(betamatrix, 2, function(x) sum(abs(x) <= epsilon))
+  PostOdds2 = BetgmaPost1/BetgmaPost2
+    PriorOdds2 = (2*(1-p)*(1-pnorm(epsilon/sigma0))+2*p*(1-pnorm(epsilon/sigma1)))/((1-p)*(pnorm(epsilon/sigma0)-pnorm(-epsilon/sigma0))+p*(pnorm(epsilon/sigma1)-pnorm(-epsilon/sigma1)))
+  BetgmaFactor = PostOdds2/PriorOdds2 # calculate bayes factor for Model II
+  BFbeta.2 = (1:P)[BetgmaFactor>10] # let threshold = 10 for bayes factor
+
+    ### select variable using 95% equal-tailed credible interval of gammaXbeta
+  ci.low<-apply(betamatrix,2,quantile,0.025)
+  ci.high<-apply(betamatrix,2,quantile,0.975)
+  ci<-rbind(ci.low,ci.high)
+  e.ci.2<-ifelse( (ci[1,]>0 & ci[2,]>0) | (ci[1,]<0 & ci[2,]<0) ,TRUE,FALSE)
+   if (sum(e.ci.2)>0) {
+    e.ci.id.2<-(1:P)[e.ci.2]
+   }
+     ### select variable using 95% HPD credible interval of gammaXbeta
+   hd<-apply(betamatrix,2,hdi,0.95)
+   e.hd.2<-ifelse( (hd[1,]>0 & hd[2,]>0) | (hd[1,]<0 & hd[2,]<0) ,TRUE,FALSE)
+   if (sum(e.hd.2)>0) {
+    e.hd.id.2<-(1:P)[e.hd.2]
+   }
+ save.image("Model2FixedPi05BMC.RData")
+  stopCluster(cl)
+```
+
+
