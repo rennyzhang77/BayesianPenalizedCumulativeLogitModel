@@ -1,7 +1,5 @@
-The application data are stored in the "GSE14468.RData" object. This object results from running GSE14468.Rmd which saves downloading and processing hundreds of CEL files.
-
 GSE14468.Rmd is the code that was used to process the raw CEL files and combine the CEL files with the phenotypic data that should be downloaded from Gene Expression Omnibus from GSE14468_series_matrix.txt.gz using the Bioconductor GEOqery package. 
-To replicate this code, download the CEL files from Gene Expression Omnibus and stored in the baseDir in a folder named GSE14468_RAW.
+To replicate this code, download the CEL files from Gene Expression Omnibus and stored in the baseDir in a folder named GSE14468_RAW. A "GSE14468.RData" object is created from running GSE14468.Rmd.
 Required packages include digest, purrr, stringr, affyio, lubridate, GEOquery, affy.
 
 
